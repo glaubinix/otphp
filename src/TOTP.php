@@ -12,7 +12,7 @@ use function is_int;
 /**
  * @see \OTPHP\Test\TOTPTest
  */
-final class TOTP extends OTP implements TOTPInterface
+final class TOTP extends OTP implements TOTPInterface, OTPWithPreviousTimestampInterface
 {
     private readonly ClockInterface $clock;
 
@@ -118,12 +118,30 @@ final class TOTP extends OTP implements TOTPInterface
      */
     public function verify(string $otp, null|int $timestamp = null, null|int $leeway = null): bool
     {
+        return $this->verifyWithPreviousTimestamp($otp, $timestamp, $leeway, null) !== false;
+    }
+
+    /**
+     * Verify method which prevents previously used codes from being used again. The passed values are in seconds.
+     *
+     * @param non-empty-string $otp
+     * @param 0|positive-int $timestamp
+     * @param null|0|positive-int $leeway
+     * @param null|0|positive-int $previousTimestamp
+     * @return int|false the timestamp matching the otp on success, and false on error
+     */
+    public function verifyWithPreviousTimestamp(
+        string $otp,
+        null|int $timestamp = null,
+        null|int $leeway = null,
+        null|int $previousTimestamp = null
+    ): int|false {
         $timestamp ??= $this->clock->now()
             ->getTimestamp();
         $timestamp >= 0 || throw new InvalidArgumentException('Timestamp must be at least 0.');
 
         if ($leeway === null) {
-            return $this->compareOTP($this->at($timestamp), $otp);
+            return $this->verifyOTPAtTimestamps($otp, [$timestamp], $previousTimestamp);
         }
 
         $leeway = abs($leeway);
@@ -135,9 +153,11 @@ final class TOTP extends OTP implements TOTPInterface
             'The timestamp must be greater than or equal to the leeway.'
         );
 
-        return $this->compareOTP($this->at($timestampMinusLeeway), $otp)
-            || $this->compareOTP($this->at($timestamp), $otp)
-            || $this->compareOTP($this->at($timestamp + $leeway), $otp);
+        return $this->verifyOTPAtTimestamps(
+            $otp,
+            [$timestampMinusLeeway, $timestamp, $timestamp + $leeway],
+            $previousTimestamp
+        );
     }
 
     public function getProvisioningUri(): string
@@ -198,6 +218,30 @@ final class TOTP extends OTP implements TOTPInterface
         }
 
         ksort($options);
+    }
+
+    /**
+     * @param non-empty-string $otp
+     * @param array<0|positive-int> $timestamps
+     */
+    private function verifyOTPAtTimestamps(string $otp, array $timestamps, null|int $previousTimestamp): int|false
+    {
+        $previousTimeCode = null;
+        if ($previousTimestamp > 0) {
+            $previousTimeCode = $this->timecode($previousTimestamp);
+        }
+
+        foreach ($timestamps as $timestamp) {
+            if ($previousTimeCode !== null && $previousTimeCode >= $this->timecode($timestamp)) {
+                continue;
+            }
+
+            if ($this->compareOTP($this->at($timestamp), $otp)) {
+                return $timestamp;
+            }
+        }
+
+        return false;
     }
 
     /**
