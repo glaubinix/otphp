@@ -212,6 +212,18 @@ final class TOTPTest extends TestCase
     }
 
     #[Test]
+    public function verifyOtpWithPreviousTimestamp(): void
+    {
+        $otp = self::createTOTP(6, 'sha1', 30);
+
+        static::assertSame(319_690_800, $otp->verifyWithPreviousTimestamp('762124', 319_690_800, null, 0));
+        static::assertSame(319_690_800, $otp->verifyWithPreviousTimestamp('762124', 319_690_800, null, 319_690_770), 'Can use new code');
+        static::assertFalse($otp->verifyWithPreviousTimestamp('762124', 319_690_800, null, 319_690_800), 'Cannot use same code again');
+        static::assertFalse($otp->verifyWithPreviousTimestamp('762124', 319_690_801, null, 319_690_800), 'Cannot use same code again at different timestamp');
+        static::assertFalse($otp->verifyWithPreviousTimestamp('762124', 319_690_800, null, 319_690_830), 'Cannot use previous code');
+    }
+
+    #[Test]
     public function notCompatibleWithGoogleAuthenticator(): void
     {
         $otp = self::createTOTP(9, 'sha512', 10);
